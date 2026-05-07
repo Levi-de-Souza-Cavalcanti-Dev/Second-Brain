@@ -1,0 +1,30 @@
+# Metadados do pacote, build e ferramentas.
+# Dependências: requirements.txt (único ficheiro).
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secondbrain"
+version = "0.1.0"
+description = "Second brain over Obsidian vault: semantic search and RAG"
+readme = "README.md"
+requires-python = ">=3.11"
+# Instale com: pip install -r requirements.txt
+dependencies = []
+
+[project.scripts]
+secondbrain = "secondbrain.cli.main:app_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+packages = ["secondbrain"]

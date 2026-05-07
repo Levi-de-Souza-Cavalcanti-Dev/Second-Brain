@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/
+*.egg-info/
+dist/
+build/
+.env
+env/
+env
+
+# --- Obsidian (evitar commit acidental de vault / metadados no mesmo repo) ---
+**/.obsidian/
+**/.trash/
+**/.stversions/
+*.excalidraw.md
+
+# Pastas onde costuma pôr-se uma cópia do vault (ajusta ou acrescenta nomes teus).
+/vault/
+/obsidian/
+/Obsidian Vault/
