@@ -3,6 +3,7 @@ from __future__ import annotations
 import structlog
 
 from secondbrain.config import Settings
+from secondbrain.ingestion.indexer import auto_index_if_needed
 from secondbrain.llm.factory import aclose_chat_client, make_chat_client
 from secondbrain.models import AskRequest, AskResponse, SearchHit, SourceCitation
 from secondbrain.rag.prompts import SYSTEM_PROMPT, USER_MESSAGE_TEMPLATE
@@ -41,6 +42,7 @@ def build_context_with_citations(
 
 
 async def answer_question(settings: Settings, req: AskRequest) -> AskResponse:
+    await auto_index_if_needed(settings)
     _LOG.info(
         "rag.ask.start",
         query_preview=req.query[:120],

@@ -67,6 +67,7 @@ async def index_vault(settings: Settings) -> IndexSummary:
         store = await build_vector_store(str(vs), deps)
 
         files = vault_markdown_paths(vr, settings.ignore_globs)
+        current_paths = {filepath_to_posix_source(p, vr) for p in files}
         skipped = 0
         indexed = 0
         chunks_total = 0
@@ -89,6 +90,11 @@ async def index_vault(settings: Settings) -> IndexSummary:
             return out
 
         try:
+            removed_paths = [posix for posix in hashes if posix not in current_paths]
+            for removed_path in removed_paths:
+                await store.delete_by_source_path(removed_path)
+                hashes.pop(removed_path, None)
+
             for md_path in files:
                 posix = filepath_to_posix_source(md_path, vr)
                 h = compute_file_content_hash_from_path(md_path)
@@ -140,3 +146,35 @@ async def index_vault(settings: Settings) -> IndexSummary:
             await store.close()
     finally:
         await aclose_embedder(embedder)
+
+
+def vault_has_changes(settings: Settings) -> bool:
+    """Fast filesystem check to decide if auto-index is necessary."""
+
+    vr = pathlib.Path(settings.obsidian_vault_path).expanduser().resolve()
+    vs = pathlib.Path(settings.vectorstore_path).expanduser().resolve()
+
+    manifest = _manifest_path(vs)
+    hashes = load_manifest(manifest)
+    files = vault_markdown_paths(vr, settings.ignore_globs)
+
+    seen_paths: set[str] = set()
+    for md_path in files:
+        posix = filepath_to_posix_source(md_path, vr)
+        seen_paths.add(posix)
+        current_hash = compute_file_content_hash_from_path(md_path)
+        if hashes.get(posix) != current_hash:
+            return True
+
+    return any(path not in seen_paths for path in hashes)
+
+
+async def auto_index_if_needed(settings: Settings) -> IndexSummary | None:
+    """Run incremental indexing only when vault content changed."""
+
+    if not vault_has_changes(settings):
+        _LOG.info("index.auto.skipped", reason="vault_unchanged")
+        return None
+
+    _LOG.info("index.auto.triggered", reason="vault_changed")
+    return await index_vault(settings)
