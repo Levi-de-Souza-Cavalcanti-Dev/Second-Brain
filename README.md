@@ -1,123 +1,123 @@
-# secondbrain
+# Second Brain
 
-Índice semântico e RAG sobre o vault Markdown do **Obsidian** (YAML frontmatter, tags `#` e YAML, wikilinks `[[ligações]]`, caminho relativo ao vault).
+Semantic index and **RAG** over an **Obsidian** Markdown vault (YAML frontmatter, `#` and YAML tags, `[[wikilinks]]`, paths relative to the vault).
 
-Stack principal: Python 3.11+, **FastAPI**, **Typer**, **Rich** (JSON indentado/realçado no terminal, alternativa ao `jq` só com pip), **ChromaDB** (persistência em disco via `VECTORSTORE_PATH`), **httpx** (Ollama + OpenAI-compat), **python-frontmatter**, **pathspec** (glob negado estilo `.gitignore`).
+Core stack: Python 3.11+, **FastAPI**, **Typer**, **Rich** (indented/highlighted JSON in the terminal, a `pip`-only alternative to `jq`), **ChromaDB** (on-disk persistence via `VECTORSTORE_PATH`), **httpx** (Ollama + OpenAI-compatible), **python-frontmatter**, **pathspec** (negated globs like `.gitignore`).
 
-## Escolhas de projeto
+## Project choices
 
-- **Pacotes**: único **`requirements.txt`** (runtime + testes + `sentence-transformers` na mesma lista; a última só é usada se configurar o provider).
-- **Vector DB**: **Chroma** `PersistentClient` em `VECTORSTORE_PATH` (coleção `secondbrain_notes`).
-- **Embeddings obrigatórios via HTTP**: chamadas `POST ${OLLAMA_HOST}/api/embed` (API atual; a rota `/api/embeddings` é legada e usa outro contrato).
-- **Fallback embeddings**: `sentence-transformers` já está em `requirements.txt`; use `EMBEDDING_PROVIDER=sentence_transformers` quando quiser.
-- **`file_hash`**: `SHA-256` Unicode do arquivo inteiro (inclui frontmatter), após normalizar quebras `\r`/`\r\n → \n` e `rstrip` por linha.
-- **`chunk_id`**: `SHA-256(hex)` de `{source_path}\0{heading_path|__root__}\0ordinal}` (ordinal monotônico por arquivo conforme ordenação atual).
+- **Packages**: single **`requirements.txt`** (runtime + tests + `sentence-transformers` in the same list; the last is only used if you configure that provider).
+- **Vector DB**: **Chroma** `PersistentClient` at `VECTORSTORE_PATH` (collection `secondbrain_notes`).
+- **Embeddings via HTTP**: calls `POST ${OLLAMA_HOST}/api/embed` (current API; `/api/embeddings` is legacy and uses a different contract).
+- **Embedding fallback**: `sentence-transformers` is already in `requirements.txt`; set `EMBEDDING_PROVIDER=sentence_transformers` when you want it.
+- **`file_hash`**: `SHA-256` of the whole Unicode file (including frontmatter), after normalizing line endings `\r`/`\r\n → \n` and `rstrip` per line.
+- **`chunk_id`**: `SHA-256` hex of `{source_path}\0{heading_path|__root__}\0{ordinal}` (monotonic ordinal per file under the current ordering).
 
-## Dependências rápidas
+## Quick requirements
 
 - Python ≥ 3.11
-- Serviço Ollama (local ou remoto HTTP) quando `EMBEDDING_PROVIDER=ollama` ou `CHAT_PROVIDER=ollama`
+- Ollama service (local or remote HTTP) when `EMBEDDING_PROVIDER=ollama` or `CHAT_PROVIDER=ollama`
 
-### Sugestões de modelos locais (`ollama pull …`)
+### Suggested local models (`ollama pull …`)
 
-| Uso           | Modelo exemplo            |
-|---------------|---------------------------|
-| Embedding     | `nomic-embed-text`        |
-| Chat / RAG    | `llama3.2` ou `mistral`   |
+| Use case      | Example model      |
+|---------------|--------------------|
+| Embedding     | `nomic-embed-text` |
+| Chat / RAG    | `llama3.2` or `mistral` |
 
-## Como rodar
+## How to run
 
 ```bash
-cd /caminho/para/repo
+cd /path/to/repo
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
 pip install -e .
 
-cp .env.example .env   # personalize OBSIDIAN_VAULT_PATH e demais vars
+cp .env.example .env   # set OBSIDIAN_VAULT_PATH and other vars
 secondbrain index
 secondbrain serve
 ```
 
-Com **uv**: `uv venv .venv`, ative e `uv pip install -r requirements.txt`, depois `uv pip install -e .`.
+With **uv**: `uv venv .venv`, activate, then `uv pip install -r requirements.txt`, then `uv pip install -e .`.
 
-## CLI útil
+## Useful CLI
 
-| Comando                             | Função                                                              |
-|-------------------------------------|---------------------------------------------------------------------|
-| `secondbrain index`                 | Reindex incremental (manifest + hashing; remove chunks antigos)     |
-| `secondbrain search "…"`            | Semantic search usando vector store + filtros opcionais             |
-| `secondbrain search "…" --json`      | Mesma busca em JSON indentado (`-j`; formatação via **Rich**, sem `jq`) |
-| `secondbrain ask …pergunta…`        | **RAG**: pergunta ao LLM com contexto das notas (usa `.env`; sem `curl`) |
-| `secondbrain serve`                 | FastAPI/Uvicorn em `API_HOST`:`API_PORT`                            |
+| Command                        | Purpose |
+|--------------------------------|---------|
+| `secondbrain index`            | Incremental reindex (manifest + hashing; removes stale chunks). |
+| `secondbrain search "…"`       | Semantic search over the vector store + optional filters. |
+| `secondbrain search "…" --json` | Same search as indented JSON (`-j`; **Rich**, no `jq`). |
+| `secondbrain ask …question…`   | **RAG**: asks the LLM with note context (uses `.env`; no `curl`). Before retrieval, runs incremental indexing if the vault changed. |
+| `secondbrain serve`            | FastAPI/Uvicorn on `API_HOST`:`API_PORT`. |
 
-Sem aspas também funciona: `secondbrain ask Em que notas falo de redes neurais?`  
-Flags opcionais: `ask` aceita `-k/--top-k`, `-c/--max-context-chars`, `-j/--json`.
+Quotes optional: `secondbrain ask Which notes mention neural networks?`  
+Optional flags on `ask`: `-k/--top-k`, `-c/--max-context-chars`, `-j/--json`.
 
-Flags úteis de `secondbrain search`: `--top-k`, `--tag foo`, `--path-prefix notas/area/`, `--json`/`-j`.
+Useful flags on `secondbrain search`: `--top-k`, `--tag foo`, `--path-prefix notes/area/`, `--json`/`-j`.
 
-## API & exemplos `curl`
+## API & `curl` examples
 
-| Rota                      | Finalidade                                                       |
-|---------------------------|------------------------------------------------------------------|
-| `GET /health`             | Metadados básicos                                                |
-| `POST /search`            | Hits semânticos com score + metadados                            |
-| `POST /ask`               | Pipeline RAG (recuperação + LLM configurável)                     |
-| `POST /reindex`           | Dispara nova indexação assíncrona (simples BackgroundTask FastAPI)|
+| Route          | Purpose |
+|----------------|---------|
+| `GET /health`  | Basic metadata. |
+| `POST /search` | Semantic hits with score + metadata. |
+| `POST /ask`    | RAG pipeline (retrieval + configurable LLM). |
+| `POST /reindex`| Triggers async reindex (simple FastAPI `BackgroundTask`). |
 
-Busca (`POST /search`):
+Search (`POST /search`):
 
-- JSON compacto ou **`"pretty": true`** no body; **`?pretty=true`** força indent mesmo sem esse campo no JSON. **`X-SecondBrain-Json-Pretty: true`** no pedido faz o mesmo. Respostas indentadas trazem o cabeçalho **`X-SecondBrain-Pretty: 1`** (útil com `curl -v`).
-- Com **`curl`**, o `-d '...'` sozinho costuma enviar `application/x-www-form-urlencoded`, não JSON — o servidor pode ignorar `"pretty"` (e até o modelo completo). Use **` -H 'content-type: application/json'`** ou **`curl --json '{...}'`** (curl ≥ 7.82).
-- No terminal, **`| jq .`** também formata o JSON (`pacman -S jq` no Arch).
-- Ao arranque, o servidor regista **`secondbrain.api.loaded`** com o caminho de `main.py`; se o JSON compacto persistir mesmo com `"pretty": true`, faz **`pip install -e .`**, reinicia o `serve` e confirma com **`curl -v`** o cabeçalho **`X-SecondBrain-Pretty: 1`** na resposta.
+- Compact JSON or **`"pretty": true`** in the body; **`?pretty=true`** forces indentation even without that field. **`X-SecondBrain-Json-Pretty: true`** does the same. Indented responses include **`X-SecondBrain-Pretty: 1`** (handy with `curl -v`).
+- With **`curl`**, `-d '...'` alone usually sends `application/x-www-form-urlencoded`, not JSON — the server may ignore `"pretty"` (and even the full body). Use **`-H 'content-type: application/json'`** or **`curl --json '{...}'`** (curl ≥ 7.82).
+- In the shell, **`| jq .`** also pretty-prints JSON (`pacman -S jq` on Arch).
+- On startup the server logs **`secondbrain.api.loaded`** with the path to `main.py`; if JSON stays compact even with `"pretty": true`, run **`pip install -e .`**, restart `serve`, and confirm with **`curl -v`** that **`X-SecondBrain-Pretty: 1`** appears on the response.
 
 ```bash
 curl -sf http://127.0.0.1:8000/search \
   -H 'content-type: application/json' \
-  -d '{"query":"pilhas em Python","top_k":5,"pretty":true}'
+  -d '{"query":"stacks in Python","top_k":5,"pretty":true}'
 ```
 
-Ou só pela query (pretty sem campo no JSON):
+Query string only (pretty without a field in the JSON):
 
 ```bash
 curl -sf 'http://127.0.0.1:8000/search?pretty=true' \
   -H 'content-type: application/json' \
-  -d '{"query":"pilhas em Python","top_k":5}'
+  -d '{"query":"stacks in Python","top_k":5}'
 ```
 
-Mesmo pedido com filtro opcional e `jq`:
+Same request with optional filters and `jq`:
 
 ```bash
 curl -sf http://127.0.0.1:8000/search \
   -H 'content-type: application/json' \
-  -d '{"query":"pilhas em Python","top_k":5,"filters":{"tag":"study","path_prefix":"notas/lang/"}}' \
+  -d '{"query":"stacks in Python","top_k":5,"filters":{"tag":"study","path_prefix":"notes/lang/"}}' \
   | jq .
 ```
 
 RAG (`POST /ask`):
 
-- Em **CPU**, o primeiro pedido pode **demorar vários minutos** (embedding + modelo a carregar e a gerar). Olha para o terminal do **`secondbrain serve`**: aparecem `rag.ask.start` → `retrieval_done` → `chat_request` → `done`. Enquanto estiver em `chat_request`, o modelo está no Ollama.
-- Opcional no `.env`: **`OLLAMA_CHAT_TIMEOUT_SECONDS`** (padrão 900), **`OLLAMA_EMBED_TIMEOUT_SECONDS`** (padrão 300), **`OPENAI_COMPAT_TIMEOUT_SECONDS`** (chat compat OpenAI).
-- No `curl`, podes aumentar limite cliente: **`curl --max-time 960 ...`**.
+- On **CPU**, the first request can **take several minutes** (embedding + model load + generation). Watch the **`secondbrain serve`** terminal: `rag.ask.start` → `retrieval_done` → `chat_request` → `done`. While it shows `chat_request`, the model is busy in Ollama.
+- Optional in `.env`: **`OLLAMA_CHAT_TIMEOUT_SECONDS`** (default 900), **`OLLAMA_EMBED_TIMEOUT_SECONDS`** (default 300), **`OPENAI_COMPAT_TIMEOUT_SECONDS`** (OpenAI-compatible chat).
+- In `curl`, raise the client limit: **`curl --max-time 960 ...`**.
 
 ```bash
 curl -sf --max-time 960 http://127.0.0.1:8000/ask \
   -H 'content-type: application/json' \
   -H 'x-secondbrain-json-pretty: true' \
-  -d '{"query":"Resume ideias sobre RAG nas minhas notas","top_k":8,"max_context_chars":12000,"pretty":true}'
+  -d '{"query":"Summarize ideas about RAG from my notes","top_k":8,"max_context_chars":12000,"pretty":true}'
 ```
 
-Ou: `... | jq .` sem usar `pretty`.
+Or: `... | jq .` without using `pretty`.
 
-Para ver JSON da API **a partir de Python** (também com pip, como o `jq` no terminal):
+To consume API JSON **from Python** (also via pip, like `jq` in the shell):
 
 ```python
 import httpx
 from rich.console import Console
 
-# `/search`: timeout curto costuma bastar; para `/ask` em CPU usa timeout alto (ex.: 960).
+# `/search`: a short timeout is usually enough; for `/ask` on CPU use a high timeout (e.g. 960).
 resp = httpx.post(
     "http://127.0.0.1:8000/search",
     json={"query": "neural networks", "top_k": 5},
@@ -126,36 +126,36 @@ resp = httpx.post(
 Console().print_json(resp.text)
 ```
 
-Saúde:
+Health:
 
 ```bash
 curl -sf http://127.0.0.1:8000/health | jq .
 ```
 
-Para explorar notas **sem montar JSON à mão**: **`secondbrain search "…"`** (trechos + caminhos) ou **`secondbrain ask …`** (RAG pelo terminal, mesmo motor que `POST /ask`).
+To explore notes **without hand-building JSON**: **`secondbrain search "…"`** (snippets + paths) or **`secondbrain ask …`** (terminal RAG, same engine as `POST /ask`).
 
-## Git e vault dentro do mesmo repositório
+## Git and vault in the same repo
 
-O **`.gitignore`** ignora metadados do Obsidian (`**/.obsidian/`, `.trash`, `*.excalidraw.md`, etc.) e pastas típicas de vault na raiz (`vault/`, `obsidian/`, `Obsidian Vault/`). Quem usar outro nome de pasta deve **acrescentá-lo ao `.gitignore`** para não comitar notas por engano.
+**`.gitignore`** skips Obsidian metadata (`**/.obsidian/`, `.trash`, `*.excalidraw.md`, etc.) and typical vault folders at the repo root (`vault/`, `obsidian/`, `Obsidian Vault/`). If you use another folder name, **add it to `.gitignore`** so notes are not committed by mistake.
 
-## Observabilidade / erros
+## Observability / errors
 
-- Logging via **structlog** com renderização texto simples (`rag.*` durante `POST /ask`; `secondbrain.api.loaded` no arranque com caminho do `main.py`).
-- Exceções de embedding ou chat aparecem como **HTTP 502** com detalhes textuais.
-- Secrets via ambiente apenas (ex.: `.env` local ignorado pelo git); use `.env.example` como modelo.
+- Logging with **structlog** and plain text (`rag.*` during `POST /ask`; `secondbrain.api.loaded` at startup with the path to `main.py`).
+- Embedding or chat failures surface as **HTTP 502** with text details.
+- Secrets only via environment (e.g. local `.env` ignored by git); use `.env.example` as a template.
 
-## Testes
+## Tests
 
 ```bash
 pytest -q
 ```
 
-Cobertos entre outros: parsers/chunkers/hashing, cliente Ollama embeddings (mock HTTP), retrieval com Chroma efémero + embedder sintético, formato JSON `/search`/`/ask` e comandos **`search`/`ask`** na CLI (`typer.testing`).
+Coverage includes, among other things: parsers/chunkers/hashing, Ollama embedding client (HTTP mock), retrieval with ephemeral Chroma + synthetic embedder, `/search`/`/ask` JSON shape, and CLI **`search`/`ask`** (`typer.testing`).
 
-## Camadas extras opcionais
+## Optional extra layers
 
-- `LexicalRetriever` já tem implementação **`NoopLexicalRetriever`** pronta para troca futura (`rank_bm25`/FTS/etc.).
+- `LexicalRetriever` already has a **`NoopLexicalRetriever`** implementation for a future swap (`rank_bm25`/FTS/etc.).
 
 ---
 
-Pull requests bem-vindos: mantenha o escopo incremental (evite mexer em módulos sem necessidade ao adicionar features).
+Pull requests welcome: keep changes incremental (avoid touching unrelated modules when adding features).
