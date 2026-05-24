@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from secondbrain.vectorstore.lance_or_chroma_impl import ChromaVectorStore
+from secondbrain.vectorstore.chroma_store import ChromaVectorStore
 from secondbrain.vectorstore.store import VectorStoreProtocol
 
 
@@ -13,5 +13,8 @@ class VectorStoreDeps:
 
 
 async def build_vector_store(persistence_path: str, deps: VectorStoreDeps) -> VectorStoreProtocol:
-    _ = deps.dimension  # reserved for future validation / LanceDB migrations
-    return ChromaVectorStore(persistence_path, deps.collection_name)
+    return ChromaVectorStore(
+        persistence_path,
+        deps.collection_name,
+        expected_dimension=deps.dimension,
+    )

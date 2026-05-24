@@ -12,6 +12,7 @@ Core stack: Python 3.11+, **Typer**, **Rich** (indented/highlighted JSON in the 
 - **Embedding fallback**: `sentence-transformers` is already in `requirements.txt`; set `EMBEDDING_PROVIDER=sentence_transformers` when you want it.
 - **`file_hash`**: `SHA-256` of the whole Unicode file (including frontmatter), after normalizing line endings `\r`/`\r\n → \n` and `rstrip` per line.
 - **`chunk_id`**: `SHA-256` hex of `{source_path}\0{heading_path|__root__}\0{ordinal}` (monotonic ordinal per file under the current ordering).
+- **`manifest.json` (v1)**: versioned index state (`embed_model`, `embed_dim`, `entries` path→hash); v0 flat dict migrates on next `index`. Sidecar `manifest_meta.json` stores `(mtime_ns, size)` for fast change detection on `ask`.
 
 ## Quick requirements
 
@@ -64,7 +65,7 @@ On **CPU**, the first `ask` can **take several minutes** (embedding + model load
 
 ## Observability / errors
 
-- Logging with **structlog** and plain text (`rag.*` during `ask`).
+- Logging with **structlog** (console or JSON via `LOG_JSON=true`; level via `LOG_LEVEL` or `--log-level` on the CLI).
 - Embedding or chat failures are raised as clear exceptions in the CLI.
 - Secrets only via environment (e.g. local `.env` ignored by git); use `.env.example` as a template.
 

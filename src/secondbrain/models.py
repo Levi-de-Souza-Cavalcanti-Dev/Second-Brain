@@ -38,6 +38,7 @@ class AskRequest(BaseModel):
 class SourceCitation(BaseModel):
     path: str
     heading_path: str
+    title: str = ""
 
 
 class AskResponse(BaseModel):

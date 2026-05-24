@@ -11,10 +11,12 @@ from rich.console import Console
 
 from secondbrain.config import Settings
 from secondbrain.ingestion.indexer import index_vault
-from secondbrain.logging_config import configure_structlog
+from secondbrain.logging_config import configure_structlog, resolve_log_level
 from secondbrain.models import AskRequest, SearchFilters, SearchRequest
 from secondbrain.rag.pipeline import answer_question
 from secondbrain.retrieval.retriever import semantic_search_service
+
+_LOG_LEVEL_OPTION: str | None = None
 
 
 def _print_json_pretty(payload: dict[str, Any]) -> None:
@@ -26,8 +28,21 @@ app_cli = typer.Typer(no_args_is_help=True, help="Obsidian vault → segundo cé
 
 
 @app_cli.callback()
-def _configure_logs() -> None:
-    configure_structlog()
+def _configure_logs(
+    log_level: str | None = typer.Option(
+        None,
+        "--log-level",
+        help="Nível de log (DEBUG, INFO, WARNING, …). Sobrescreve LOG_LEVEL do .env.",
+    ),
+) -> None:
+    global _LOG_LEVEL_OPTION  # noqa: PLW0603
+    _LOG_LEVEL_OPTION = log_level
+    settings = Settings()
+    level_name = (log_level or settings.log_level or "INFO").upper()
+    configure_structlog(
+        level=resolve_log_level(level_name),
+        json_output=settings.log_json,
+    )
 
 
 @app_cli.command("index")
@@ -72,9 +87,12 @@ def search_command(
     typer.echo(f"{len(hits)} hits")
     typer.echo("")
     for hit in hits:
-        path = str((hit.metadata or {}).get("source_path", ""))
+        md = hit.metadata or {}
+        path = str(md.get("source_path", ""))
+        title = str(md.get("title") or "")
+        label = f"{title} · {path}" if title else path
         score_txt = str(round(hit.score, 4))
-        typer.echo(f"[{score_txt}] {path}")
+        typer.echo(f"[{score_txt}] {label}")
         excerpt = (hit.text or "").replace("\n", " ")[:260]
         typer.echo(f"  {excerpt}...")
         typer.echo("")
@@ -116,8 +134,11 @@ def ask_command(
         return
     for cite in out.sources:
         h = cite.heading_path.strip() if cite.heading_path else ""
-        suffix = f" · {h}" if h else ""
-        typer.echo(f"  • {cite.path}{suffix}")
+        heading_suffix = f" · {h}" if h else ""
+        if cite.title:
+            typer.echo(f"  • {cite.title} · {cite.path}{heading_suffix}")
+        else:
+            typer.echo(f"  • {cite.path}{heading_suffix}")
 
 
 def app_main() -> None:

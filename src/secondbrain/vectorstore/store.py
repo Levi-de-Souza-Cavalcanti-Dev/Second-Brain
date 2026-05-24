@@ -24,6 +24,7 @@ class VectorStoreProtocol(Protocol):
         query_embedding: Sequence[float],
         *,
         top_k: int,
+        where: dict[str, Any] | None = None,
     ) -> list[SearchHit]: ...
 
     async def close(self) -> None: ...

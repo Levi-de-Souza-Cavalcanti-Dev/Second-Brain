@@ -45,6 +45,7 @@ def chunk_markdown_into_documents(
     file_hash: str,
     tags: tuple[str, ...],
     wikilinks: tuple[str, ...],
+    title: str = "",
     chunk_size_chars: int,
     chunk_overlap_chars: int,
 ) -> list[DocumentChunk]:
@@ -91,6 +92,7 @@ def chunk_markdown_into_documents(
         ):
             cid = stable_chunk_id(source_path_posix, heading_path or "__root__", ordinal)
             meta: dict[str, object] = {
+                "title": title,
                 "title_path": heading_path,
             }
             chunks.append(

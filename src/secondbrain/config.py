@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     embedding_batch_concurrency: int = Field(default=4, alias="EMBEDDING_BATCH_CONCURRENCY")
     embedding_request_batch_size: int = Field(default=16, alias="EMBEDDING_REQUEST_BATCH_SIZE")
 
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    log_json: bool = Field(default=False, alias="LOG_JSON")
+
     ignore_globs: str = Field(
         default=(
             ".obsidian/**,"

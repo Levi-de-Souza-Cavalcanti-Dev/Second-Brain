@@ -11,6 +11,8 @@ from secondbrain.retrieval.retriever import retrieve_top_hits
 
 _LOG = structlog.get_logger()
 
+EMPTY_CONTEXT_ANSWER = "Sem contexto suficiente no vault."
+
 
 def build_context_with_citations(
     hits: list[SearchHit],
@@ -20,23 +22,32 @@ def build_context_with_citations(
     blocks: list[str] = []
     used = 0
     citations: list[SourceCitation] = []
-    seen: set[tuple[str, str]] = set()
+    seen_cite: set[tuple[str, str]] = set()
+    seen_text: set[str] = set()
 
     for h in hits:
         md = h.metadata or {}
         path = str(md.get("source_path", ""))
         heading = str(md.get("heading_path", ""))
-        header = f"--- fonte: {path} | heading_path: {heading}"
+        title = str(md.get("title") or "")
+        key = (path, heading)
+        if key not in seen_cite:
+            citations.append(SourceCitation(path=path, heading_path=heading, title=title))
+            seen_cite.add(key)
+
         body = h.text.strip()
+        if not body or body in seen_text:
+            continue
+        seen_text.add(body)
+
+        header = f"--- fonte: {path} | heading_path: {heading}"
+        if title:
+            header = f"--- fonte: {title} · {path} | heading_path: {heading}"
         block = f"{header}\n{body}\n"
         if used + len(block) > max_context_chars:
             break
         blocks.append(block)
         used += len(block)
-        key = (path, heading)
-        if key not in seen:
-            citations.append(SourceCitation(path=path, heading_path=heading))
-            seen.add(key)
 
     return "\n".join(blocks), citations
 
@@ -51,10 +62,18 @@ async def answer_question(settings: Settings, req: AskRequest) -> AskResponse:
     )
     hits = await retrieve_top_hits(settings, query=req.query, top_k=req.top_k)
     _LOG.info("rag.ask.retrieval_done", n_hits=len(hits))
+
+    if not hits:
+        _LOG.info("rag.ask.empty_context")
+        return AskResponse(answer=EMPTY_CONTEXT_ANSWER, sources=[])
+
     context, citations = build_context_with_citations(hits, max_context_chars=req.max_context_chars)
 
     chat = make_chat_client(settings)
-    user_msg = USER_MESSAGE_TEMPLATE.format(context=context if context.strip() else "(vazio)", query=req.query)
+    user_msg = USER_MESSAGE_TEMPLATE.format(
+        context=context if context.strip() else "(vazio)",
+        query=req.query,
+    )
     messages: list[dict[str, str]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_msg},
