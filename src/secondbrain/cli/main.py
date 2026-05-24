@@ -6,7 +6,6 @@ import asyncio
 from typing import Any
 
 import typer
-import uvicorn
 from pydantic import ValidationError
 from rich.console import Console
 
@@ -119,19 +118,6 @@ def ask_command(
         h = cite.heading_path.strip() if cite.heading_path else ""
         suffix = f" · {h}" if h else ""
         typer.echo(f"  • {cite.path}{suffix}")
-
-
-@app_cli.command("serve")
-def serve_command() -> None:
-    settings = Settings()
-    uvicorn.run(
-        "secondbrain.api.main:app",
-        host=str(settings.api_host),
-        port=int(settings.api_port),
-        reload=False,
-        log_level="info",
-        factory=False,
-    )
 
 
 def app_main() -> None:

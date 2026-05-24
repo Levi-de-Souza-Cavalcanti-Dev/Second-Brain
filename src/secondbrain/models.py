@@ -17,15 +17,6 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(default=10, ge=1, le=100)
     filters: SearchFilters | None = None
-    pretty: bool = Field(
-        default=False,
-        description=(
-            "Se true, o JSON da resposta vem indentado. "
-            "Query `?pretty=true` força indent. "
-            "`?pretty=false` não cancela este campo (use body sem pretty). "
-            "Alternativa: cabeçalho `X-SecondBrain-Json-Pretty: true`."
-        ),
-    )
 
 
 class SearchHit(BaseModel):
@@ -42,14 +33,6 @@ class AskRequest(BaseModel):
     query: str
     top_k: int = Field(default=8, ge=1, le=50)
     max_context_chars: int = Field(default=12_000, ge=500, le=100_000)
-    pretty: bool = Field(
-        default=False,
-        description=(
-            "Se true, o JSON da resposta vem indentado. "
-            "Query `?pretty=true` força indent; `?pretty=false` não cancela este campo. "
-            "Cabeçalho `X-SecondBrain-Json-Pretty: true` como alternativa."
-        ),
-    )
 
 
 class SourceCitation(BaseModel):
@@ -60,11 +43,6 @@ class SourceCitation(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     sources: list[SourceCitation]
-
-
-class ReindexResponse(BaseModel):
-    ok: bool
-    message: str
 
 
 @dataclass(frozen=True, slots=True)

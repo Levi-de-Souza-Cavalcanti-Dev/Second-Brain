@@ -85,9 +85,6 @@ class Settings(BaseSettings):
         description="Comma-separated glob patterns relative to vault root.",
     )
 
-    api_host: str = Field(default="127.0.0.1", alias="API_HOST")
-    api_port: int = Field(default=8000, alias="API_PORT")
-
 
 def parse_ignore_globs(raw: str) -> list[str]:
     return [s.strip() for s in raw.split(",") if s.strip()]
