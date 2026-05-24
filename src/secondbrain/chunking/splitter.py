@@ -3,28 +3,29 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
+from secondbrain.chunking.tokenizer import TokenCounter, make_token_counter
 from secondbrain.ingestion.markdown_parser import stable_chunk_id
 from secondbrain.models import DocumentChunk
 
 _HEADING_LINE = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$")
 
 
-def _split_large_text(text: str, chunk_size_chars: int, overlap_chars: int) -> list[str]:
-    if chunk_size_chars <= 0:
+def _split_large_text(text: str, chunk_size: int, overlap: int) -> list[str]:
+    if chunk_size <= 0:
         return [text] if text else []
     trimmed = text.strip()
     if not trimmed:
         return []
-    if len(trimmed) <= chunk_size_chars:
+    if len(trimmed) <= chunk_size:
         return [trimmed]
     parts: list[str] = []
     start = 0
-    overlap = max(0, overlap_chars)
+    overlap = max(0, overlap)
     while start < len(trimmed):
-        end = min(len(trimmed), start + chunk_size_chars)
+        end = min(len(trimmed), start + chunk_size)
         chunk = trimmed[start:end].strip()
         if chunk:
             parts.append(chunk)
@@ -32,6 +33,44 @@ def _split_large_text(text: str, chunk_size_chars: int, overlap_chars: int) -> l
             break
         start = max(0, end - overlap)
     return parts
+
+
+def _split_large_text_tokens(
+    text: str,
+    counter: TokenCounter,
+    chunk_size_tokens: int,
+    overlap_tokens: int,
+) -> list[str]:
+    tokens = counter.encode(text.strip())
+    if not tokens:
+        return []
+    if len(tokens) <= chunk_size_tokens:
+        return [text.strip()]
+    parts: list[str] = []
+    start = 0
+    overlap = max(0, overlap_tokens)
+    while start < len(tokens):
+        end = min(len(tokens), start + chunk_size_tokens)
+        chunk_tokens = tokens[start:end]
+        decoded = counter.decode(chunk_tokens).strip()
+        if decoded:
+            parts.append(decoded)
+        if end >= len(tokens):
+            break
+        start = max(0, end - overlap)
+    return parts
+
+
+def _line_range_for_text(full_lines: list[str], chunk_text: str) -> tuple[int, int]:
+    """Best-effort line range for a chunk within section lines."""
+    joined = "\n".join(full_lines)
+    idx = joined.find(chunk_text[: min(80, len(chunk_text))])
+    if idx < 0:
+        return (1, max(1, len(full_lines)))
+    prefix = joined[:idx]
+    line_start = prefix.count("\n") + 1
+    line_end = line_start + chunk_text.count("\n")
+    return (line_start, max(line_start, line_end))
 
 
 def _heading_path(stack: Iterable[tuple[int, str]]) -> str:
@@ -48,12 +87,17 @@ def chunk_markdown_into_documents(
     title: str = "",
     chunk_size_chars: int,
     chunk_overlap_chars: int,
+    chunk_size_tokens: int = 512,
+    chunk_overlap_tokens: int = 64,
+    chunk_by_tokens: bool = False,
+    token_model_hint: str = "",
 ) -> list[DocumentChunk]:
     """Produce DocumentChunk records with deterministic chunk_id ordering."""
 
     lines = vault_relative_body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    counter = make_token_counter(by_tokens=chunk_by_tokens, model_hint=token_model_hint)
 
-    sections: list[tuple[str, int, list[str]]] = []  # heading_path, level, segment lines raw
+    sections: list[tuple[str, int, list[str]]] = []
     stack: list[tuple[int, str]] = []
     acc: list[str] = []
 
@@ -69,10 +113,10 @@ def chunk_markdown_into_documents(
         if hm:
             flush()
             level = len(hm.group(1))
-            title = hm.group(2).strip()
+            heading_title = hm.group(2).strip()
             while stack and stack[-1][0] >= level:
                 stack.pop()
-            stack.append((level, title))
+            stack.append((level, heading_title))
             continue
         acc.append(line)
     flush()
@@ -87,9 +131,19 @@ def chunk_markdown_into_documents(
         joined = "\n".join(seg_lines).strip()
         if not joined:
             continue
-        for sub_i, chunk_text in enumerate(
-            _split_large_text(joined, chunk_size_chars, chunk_overlap_chars),
-        ):
+
+        if chunk_by_tokens:
+            text_parts = _split_large_text_tokens(
+                joined,
+                counter,
+                chunk_size_tokens,
+                chunk_overlap_tokens,
+            )
+        else:
+            text_parts = _split_large_text(joined, chunk_size_chars, chunk_overlap_chars)
+
+        for sub_i, chunk_text in enumerate(text_parts):
+            line_start, line_end = _line_range_for_text(seg_lines, chunk_text)
             cid = stable_chunk_id(source_path_posix, heading_path or "__root__", ordinal)
             meta: dict[str, object] = {
                 "title": title,
@@ -106,6 +160,8 @@ def chunk_markdown_into_documents(
                     file_hash=file_hash,
                     heading_level=heading_level,
                     chunk_index_in_section=sub_i,
+                    line_start=line_start,
+                    line_end=line_end,
                     extra_metadata=meta,
                 ),
             )

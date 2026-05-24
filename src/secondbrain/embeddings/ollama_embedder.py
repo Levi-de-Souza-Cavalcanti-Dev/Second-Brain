@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import httpx
-
 import structlog
 
-from secondbrain.embeddings.base import EmbeddingError, EmbedderProtocol
+from secondbrain.embeddings.base import EmbedderProtocol, EmbeddingError
 
 _LOG = structlog.get_logger()
 
@@ -51,7 +50,7 @@ class OllamaEmbedder(EmbedderProtocol):
                     )
                 return vecs
             if isinstance(raw_batch[0], (int | float)) and n_texts == 1:
-                return [[float(x) for x in raw_batch]]  # type: ignore[arg-type]
+                return [[float(x) for x in raw_batch]]
 
         if isinstance(single, list) and single:
             if isinstance(single[0], (int | float)):
@@ -59,7 +58,7 @@ class OllamaEmbedder(EmbedderProtocol):
                     raise EmbeddingError(
                         "Ollama retornou vetor único para requisição com múltiplos textos.",
                     )
-                return [[float(x) for x in single]]  # type: ignore[arg-type]
+                return [[float(x) for x in single]]
             if isinstance(single[0], list):
                 vecs = _rows_from_list_of_lists(single)
                 if len(vecs) != n_texts:

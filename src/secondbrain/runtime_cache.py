@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from secondbrain.config import Settings
+from secondbrain.constants import DEFAULT_COLLECTION_NAME
 from secondbrain.embeddings.base import EmbedderProtocol
 from secondbrain.vectorstore.factory import VectorStoreDeps, build_vector_store
 from secondbrain.vectorstore.store import VectorStoreProtocol
@@ -32,20 +33,21 @@ async def get_embedder_and_store(
     settings: Settings,
     *,
     dimension: int,
+    cache_queries: bool = True,
 ) -> tuple[EmbedderProtocol, VectorStoreProtocol]:
     global _CACHE_KEY, _EMBEDDER, _STORE, _DIM  # noqa: PLW0603
 
     key = _cache_key(settings)
-    if _EMBEDDER is not None and _STORE is not None and _CACHE_KEY == key and _DIM == dimension:
+    if _EMBEDDER is not None and _STORE is not None and key == _CACHE_KEY and dimension == _DIM:
         return _EMBEDDER, _STORE
 
     from secondbrain.embeddings.factory import make_embedder  # noqa: PLC0415
 
     await clear_runtime_cache()
 
-    embedder = make_embedder(settings)
+    embedder = make_embedder(settings, cache_queries=cache_queries)
     vs_path = str(Path(settings.vectorstore_path).expanduser().resolve())
-    deps = VectorStoreDeps(dimension=dimension, collection_name="secondbrain_notes")
+    deps = VectorStoreDeps(dimension=dimension, collection_name=DEFAULT_COLLECTION_NAME)
     store = await build_vector_store(vs_path, deps)
 
     _CACHE_KEY = key

@@ -6,8 +6,7 @@ import pytest
 
 from secondbrain.config import Settings
 from secondbrain.ingestion.indexer import index_vault, load_manifest, scan_vault_changes
-from secondbrain.ingestion.manifest import VaultManifest, manifest_path
-
+from secondbrain.ingestion.manifest import manifest_path
 from tests.helpers import configure_basic_env, write_sample_note
 
 

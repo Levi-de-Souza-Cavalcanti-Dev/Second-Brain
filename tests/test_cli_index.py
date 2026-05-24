@@ -10,7 +10,9 @@ from secondbrain.ingestion.indexer import IndexSummary
 
 
 def test_cli_index_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path / "vault"))
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(vault))
     monkeypatch.setenv("VECTORSTORE_PATH", str(tmp_path / "vs"))
 
     async def fake_index(_settings: object) -> IndexSummary:
@@ -24,7 +26,8 @@ def test_cli_index_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     assert "total arquivos: 3" in result.stdout
 
 
-def test_cli_index_settings_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OBSIDIAN_VAULT_PATH", raising=False)
+def test_cli_index_settings_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path / "missing-vault"))
+    monkeypatch.setenv("VECTORSTORE_PATH", str(tmp_path / "vs"))
     result = CliRunner().invoke(app_cli, ["index"])
     assert result.exit_code != 0

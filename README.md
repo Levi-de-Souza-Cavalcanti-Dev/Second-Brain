@@ -2,85 +2,62 @@
 
 Semantic index and **RAG** over an **Obsidian** Markdown vault (YAML frontmatter, `#` and YAML tags, `[[wikilinks]]`, paths relative to the vault).
 
-Core stack: Python 3.11+, **Typer**, **Rich** (indented/highlighted JSON in the terminal), **ChromaDB** (on-disk persistence via `VECTORSTORE_PATH`), **httpx** (Ollama + OpenAI-compatible), **python-frontmatter**, **pathspec** (negated globs like `.gitignore`).
+Core stack: Python 3.11+, **Typer**, **Rich**, **ChromaDB**, **httpx** (Ollama + OpenAI-compatible), **rank-bm25** (hybrid search), **watchfiles** (watch mode).
 
-## Project choices
-
-- **Packages**: single **`requirements.txt`** (runtime + tests + `sentence-transformers` in the same list; the last is only used if you configure that provider).
-- **Vector DB**: **Chroma** `PersistentClient` at `VECTORSTORE_PATH` (collection `secondbrain_notes`).
-- **Embeddings via HTTP**: calls `POST ${OLLAMA_HOST}/api/embed` (current API; `/api/embeddings` is legacy and uses a different contract).
-- **Embedding fallback**: `sentence-transformers` is already in `requirements.txt`; set `EMBEDDING_PROVIDER=sentence_transformers` when you want it.
-- **`file_hash`**: `SHA-256` of the whole Unicode file (including frontmatter), after normalizing line endings `\r`/`\r\n → \n` and `rstrip` per line.
-- **`chunk_id`**: `SHA-256` hex of `{source_path}\0{heading_path|__root__}\0{ordinal}` (monotonic ordinal per file under the current ordering).
-- **`manifest.json` (v1)**: versioned index state (`embed_model`, `embed_dim`, `entries` path→hash); v0 flat dict migrates on next `index`. Sidecar `manifest_meta.json` stores `(mtime_ns, size)` for fast change detection on `ask`.
-
-## Quick requirements
-
-- Python ≥ 3.11
-- Ollama service (local or remote HTTP) when `EMBEDDING_PROVIDER=ollama` or `CHAT_PROVIDER=ollama`
-
-### Suggested local models (`ollama pull …`)
-
-| Use case      | Example model      |
-|---------------|--------------------|
-| Embedding     | `nomic-embed-text` |
-| Chat / RAG    | `llama3.2` or `mistral` |
-
-## How to run
+## Quick start
 
 ```bash
 cd /path/to/repo
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
-pip install -r requirements.txt
-pip install -e .
+pip install -e ".[dev]"
 
-cp .env.example .env   # set OBSIDIAN_VAULT_PATH and other vars
+cp .env.example .env   # OBSIDIAN_VAULT_PATH must be an existing directory
+secondbrain doctor
 secondbrain index
 secondbrain ask Which notes mention neural networks?
 ```
 
-With **uv**: `uv venv .venv`, activate, then `uv pip install -r requirements.txt`, then `uv pip install -e .`.
+With **uv**: `uv venv .venv && source .venv/bin/activate && uv pip install -e ".[dev]"`.
 
-## Useful CLI
+## CLI commands
 
-| Command                        | Purpose |
-|--------------------------------|---------|
-| `secondbrain index`            | Incremental reindex (manifest + hashing; removes stale chunks). |
-| `secondbrain search "…"`       | Semantic search over the vector store + optional filters. |
-| `secondbrain search "…" --json` | Same search as indented JSON (`-j`; **Rich**). |
-| `secondbrain ask …question…`   | **RAG**: asks the LLM with note context (uses `.env`). Before retrieval, runs incremental indexing if the vault changed. |
+| Command | Purpose |
+|---------|---------|
+| `secondbrain index` | Incremental reindex with progress bar |
+| `secondbrain search "…"` | Semantic search (+ optional `--tag`, `--path-prefix`, `--json`) |
+| `secondbrain ask …` | RAG with auto-index; `--stream/-s` for token streaming |
+| `secondbrain doctor` | Health check (vault, vectorstore, Ollama models) |
+| `secondbrain stats` | Index stats as JSON |
+| `secondbrain watch` | Watch vault and re-index on changes |
+| `secondbrain chat` | Conversational REPL (`--persist` saves session) |
+| `secondbrain serve` | HTTP API on `:8765` (requires `pip install -e ".[api]"`) |
+| `secondbrain version` | Package version |
 
-Quotes optional: `secondbrain ask Which notes mention neural networks?`  
-Optional flags on `ask`: `-k/--top-k`, `-c/--max-context-chars`, `-j/--json`.
+## Optional features (`.env`)
 
-Useful flags on `secondbrain search`: `--top-k`, `--tag foo`, `--path-prefix notes/area/`, `--json`/`-j`.
+- **Hybrid search**: `HYBRID_SEARCH=true` (BM25 + dense via RRF)
+- **Reranker**: `RERANKER_ENABLED=true` (requires `pip install -e ".[embeddings-st]"`)
+- **MMR diversification**: `MMR_LAMBDA=0.5`
+- **Token chunking**: `CHUNK_BY_TOKENS=true` (optional `pip install -e ".[tokenizer]"`)
+- **OpenAI embeddings**: `EMBEDDING_PROVIDER=openai`
+- **Wikilink expansion in RAG**: `RAG_LINK_EXPANSION=true`
+- **OpenTelemetry**: `OTEL_EXPORTER_OTLP_ENDPOINT=…` (requires `pip install -e ".[otel]"`)
 
-On **CPU**, the first `ask` can **take several minutes** (embedding + model load + generation). Optional in `.env`: **`OLLAMA_CHAT_TIMEOUT_SECONDS`** (default 900), **`OLLAMA_EMBED_TIMEOUT_SECONDS`** (default 300), **`OPENAI_COMPAT_TIMEOUT_SECONDS`** (OpenAI-compatible chat).
-
-## Git and vault in the same repo
-
-**`.gitignore`** skips Obsidian metadata (`**/.obsidian/`, `.trash`, `*.excalidraw.md`, etc.) and typical vault folders at the repo root (`vault/`, `obsidian/`, `Obsidian Vault/`). If you use another folder name, **add it to `.gitignore`** so notes are not committed by mistake.
-
-## Observability / errors
-
-- Logging with **structlog** (console or JSON via `LOG_JSON=true`; level via `LOG_LEVEL` or `--log-level` on the CLI).
-- Embedding or chat failures are raised as clear exceptions in the CLI.
-- Secrets only via environment (e.g. local `.env` ignored by git); use `.env.example` as a template.
-
-## Tests
+## Development
 
 ```bash
+ruff check src tests && ruff format --check src tests
+mypy src/secondbrain
 pytest -q
+pre-commit install   # optional hooks
 ```
 
-Coverage includes, among other things: parsers/chunkers/hashing, Ollama embedding client (HTTP mock), retrieval with ephemeral Chroma + synthetic embedder, and CLI **`search`/`ask`** (`typer.testing`).
+CI runs on Python 3.11 and 3.12 via GitHub Actions.
 
-## Optional extra layers
+## Project choices
 
-- `LexicalRetriever` already has a **`NoopLexicalRetriever`** implementation for a future swap (`rank_bm25`/FTS/etc.).
-
----
-
-Pull requests welcome: keep changes incremental (avoid touching unrelated modules when adding features).
+- Single vault via `OBSIDIAN_VAULT_PATH` (validated at startup)
+- Chroma collection `secondbrain_notes` at `VECTORSTORE_PATH`
+- Manifest v1 + `manifest_meta.json` for fast incremental indexing
+- Deterministic `chunk_id` and whole-file SHA-256 hashing

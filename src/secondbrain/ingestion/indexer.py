@@ -4,145 +4,76 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import structlog
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
 from secondbrain.chunking.splitter import chunk_markdown_into_documents, filepath_to_posix_source
 from secondbrain.config import Settings
-from secondbrain.ingestion.hashing import compute_file_content_hash_from_path
+from secondbrain.constants import DEFAULT_COLLECTION_NAME
+from secondbrain.ingestion.embedding_pipeline import EmbeddingPipeline
+from secondbrain.ingestion.hashing import compute_file_content_hash_utf8
 from secondbrain.ingestion.manifest import (
     VaultManifest,
     file_stat_meta,
     load_manifest,
-    load_manifest_meta,
-    manifest_meta_path,
-    manifest_path,
     save_manifest,
-    save_manifest_meta,
 )
+from secondbrain.ingestion.markdown_parser import parse_markdown_file
+from secondbrain.ingestion.persistence_service import PersistenceService
+from secondbrain.ingestion.scan_service import ScanService
+from secondbrain.ingestion.types import IndexSummary, VaultChangeReport, embed_model_fingerprint
+from secondbrain.ingestion.vault_scanner import vault_markdown_paths
+from secondbrain.retrieval.bm25 import BM25LexicalRetriever
+from secondbrain.vectorstore.factory import VectorStoreDeps, build_vector_store
 
-# Re-exported for tests and callers using flat manifest helpers.
+if TYPE_CHECKING:
+    from secondbrain.embeddings.base import EmbedderProtocol
+
+_LOG = structlog.get_logger()
+
 __all__ = [
     "IndexSummary",
     "VaultChangeReport",
     "VaultManifest",
     "auto_index_if_needed",
     "embed_model_fingerprint",
+    "get_bm25_retriever",
     "index_vault",
     "load_manifest",
     "save_manifest",
     "scan_vault_changes",
     "vault_has_changes",
 ]
-from secondbrain.ingestion.markdown_parser import parse_markdown_file
-from secondbrain.ingestion.vault_scanner import vault_markdown_paths
-from secondbrain.vectorstore.factory import VectorStoreDeps, build_vector_store
-
-_LOG = structlog.get_logger()
 
 
-@dataclass(slots=True)
-class IndexSummary:
-    files_total: int
-    skipped_unchanged: int
-    files_indexed: int
-    chunks_written: int
-
-
-@dataclass(slots=True)
-class VaultChangeReport:
-    """Result of a single vault scan (used by auto-index and index_vault)."""
-
-    files_to_index: list[pathlib.Path]
-    removed_posix_paths: list[str]
-    current_posix_paths: set[str]
-    force_reindex_all: bool = False
-
-    @property
-    def has_changes(self) -> bool:
-        return bool(self.files_to_index or self.removed_posix_paths or self.force_reindex_all)
-
-
-def embed_model_fingerprint(settings: Settings) -> str:
-    if settings.embedding_provider == "ollama":
-        return f"ollama:{settings.ollama_embed_model}"
-    return f"sentence_transformers:{settings.sentence_transformer_model}"
-
-
-async def _probe_embed_dim(embedder: object) -> int:
-    embed_many = getattr(embedder, "embed_many", None)
-    if embed_many is None:
-        raise TypeError("embedder must provide embed_many")
-    vecs = await embed_many([" "])
+async def _probe_embed_dim(embedder: EmbedderProtocol) -> int:
+    vecs = await embedder.embed_many([" "])
     return len(vecs[0])
 
 
 async def scan_vault_changes(settings: Settings) -> VaultChangeReport:
-    vr = pathlib.Path(settings.obsidian_vault_path).expanduser().resolve()
-    vs = pathlib.Path(settings.vectorstore_path).expanduser().resolve()
-    mf = manifest_path(vs)
-    manifest = load_manifest(mf)
-    meta_path = manifest_meta_path(vs)
-    stat_meta = load_manifest_meta(meta_path)
-
-    current_model = embed_model_fingerprint(settings)
-    force_all = False
-    if manifest.embed_model and manifest.embed_model != current_model:
-        force_all = True
-    if manifest.version < 1:
-        force_all = True
-
-    files = vault_markdown_paths(vr, settings.ignore_globs)
-    current_posix: set[str] = {filepath_to_posix_source(p, vr) for p in files}
-    removed = sorted(posix for posix in manifest.entries if posix not in current_posix)
-
-    if force_all:
-        return VaultChangeReport(
-            files_to_index=list(files),
-            removed_posix_paths=removed,
-            current_posix_paths=current_posix,
-            force_reindex_all=True,
-        )
-
-    concurrency = max(1, settings.embedding_batch_concurrency)
-    sem = asyncio.Semaphore(concurrency)
-    to_index: list[pathlib.Path] = []
-
-    async def needs_reindex(md_path: pathlib.Path) -> bool:
-        posix = filepath_to_posix_source(md_path, vr)
-        async with sem:
-            st = await asyncio.to_thread(file_stat_meta, md_path)
-            prev = stat_meta.get(posix)
-            if prev is not None and prev.mtime_ns == st.mtime_ns and prev.size == st.size:
-                if manifest.entries.get(posix) is not None:
-                    return False
-            content_hash = await asyncio.to_thread(compute_file_content_hash_from_path, md_path)
-        return manifest.entries.get(posix) != content_hash
-
-    checks = await asyncio.gather(*(needs_reindex(p) for p in files))
-    for md_path, changed in zip(files, checks, strict=True):
-        if changed:
-            to_index.append(md_path)
-
-    return VaultChangeReport(
-        files_to_index=to_index,
-        removed_posix_paths=removed,
-        current_posix_paths=current_posix,
-        force_reindex_all=False,
-    )
+    return await ScanService().scan_vault_changes(settings)
 
 
 def vault_has_changes(settings: Settings) -> bool:
-    """Fast filesystem check to decide if auto-index is necessary."""
-
     return asyncio.run(scan_vault_changes(settings)).has_changes
+
+
+def _token_model_hint(settings: Settings) -> str:
+    if settings.embedding_provider == "sentence_transformers":
+        return settings.sentence_transformer_model
+    if settings.embedding_provider == "openai":
+        return settings.openai_embed_model
+    return ""
 
 
 async def index_vault(
     settings: Settings,
     *,
     change_report: VaultChangeReport | None = None,
+    show_progress: bool = True,
 ) -> IndexSummary:
     from secondbrain.embeddings.factory import aclose_embedder, make_embedder  # noqa: PLC0415
 
@@ -150,14 +81,16 @@ async def index_vault(
     vs = pathlib.Path(settings.vectorstore_path).expanduser().resolve()
     vs.mkdir(parents=True, exist_ok=True)
 
-    mf = manifest_path(vs)
-    meta_path = manifest_meta_path(vs)
-    manifest = load_manifest(mf)
-    stat_meta = load_manifest_meta(meta_path)
+    persistence = PersistenceService(vs)
+    manifest = persistence.load_manifest()
+    stat_meta = persistence.load_stat_meta()
+    bm25_index = persistence.load_bm25()
 
     report = change_report if change_report is not None else await scan_vault_changes(settings)
 
     embedder = make_embedder(settings)
+    pipeline = EmbeddingPipeline(settings, embedder)
+
     try:
         current_model = embed_model_fingerprint(settings)
         if manifest.embed_model != current_model or manifest.embed_dim <= 0:
@@ -169,56 +102,38 @@ async def index_vault(
         manifest.embed_dim = dim
         manifest.version = 1
 
-        deps = VectorStoreDeps(dimension=dim, collection_name="secondbrain_notes")
+        deps = VectorStoreDeps(dimension=dim, collection_name=DEFAULT_COLLECTION_NAME)
         store = await build_vector_store(str(vs), deps)
 
         files = vault_markdown_paths(vr, settings.ignore_globs)
         current_paths = report.current_posix_paths or {filepath_to_posix_source(p, vr) for p in files}
         paths_to_index = (
-            set(files)
-            if report.force_reindex_all
-            else {p for p in report.files_to_index}
+            set(files) if report.force_reindex_all else {p for p in report.files_to_index}
         )
         skipped = 0
         indexed = 0
         chunks_total = 0
-
-        sem = asyncio.Semaphore(max(1, settings.embedding_batch_concurrency))
-        batch_sz = max(1, settings.embedding_request_batch_size)
-
-        async def embed_batches(texts: list[str]) -> list[list[float]]:
-            async def one_batch(batch: list[str]) -> list[list[float]]:
-                async with sem:
-                    return await embedder.embed_many(batch)
-
-            batches = [texts[i : i + batch_sz] for i in range(0, len(texts), batch_sz)]
-            if not batches:
-                return []
-            chunks_embedded = await asyncio.gather(*(one_batch(b) for b in batches))
-            out: list[list[float]] = []
-            for chunk in chunks_embedded:
-                out.extend(chunk)
-            return out
+        token_hint = _token_model_hint(settings)
 
         try:
             for removed_path in report.removed_posix_paths:
                 await store.delete_by_source_path(removed_path)
                 manifest.entries.pop(removed_path, None)
                 stat_meta.pop(removed_path, None)
+                bm25_index.delete_by_source_path(removed_path)
 
-            for md_path in files:
+            files_to_process = [p for p in files if p in paths_to_index]
+
+            async def process_file(md_path: pathlib.Path) -> tuple[pathlib.Path, int]:
                 posix = filepath_to_posix_source(md_path, vr)
                 st = await asyncio.to_thread(file_stat_meta, md_path)
-
-                if md_path not in paths_to_index:
-                    skipped += 1
-                    stat_meta[posix] = st
-                    continue
-
-                h = await asyncio.to_thread(compute_file_content_hash_from_path, md_path)
-                raw_text = md_path.read_text(encoding="utf-8", errors="replace")
+                raw_text = await asyncio.to_thread(
+                    md_path.read_text,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                h = compute_file_content_hash_utf8(raw_text)
                 parsed = parse_markdown_file(md_path, raw_text)
-
                 chunks = chunk_markdown_into_documents(
                     posix,
                     vault_relative_body=parsed.body_markdown,
@@ -228,27 +143,58 @@ async def index_vault(
                     title=parsed.title,
                     chunk_size_chars=settings.chunk_size_chars,
                     chunk_overlap_chars=settings.chunk_overlap_chars,
+                    chunk_size_tokens=settings.chunk_size_tokens,
+                    chunk_overlap_tokens=settings.chunk_overlap_tokens,
+                    chunk_by_tokens=settings.chunk_by_tokens,
+                    token_model_hint=token_hint,
                 )
-
                 await store.delete_by_source_path(posix)
-
-                indexed += 1
-                chunks_total += len(chunks)
-
                 if chunks:
-                    embeddings = await embed_batches([c.text for c in chunks])
+                    embeddings = await pipeline.embed_batches([c.text for c in chunks])
                     await store.upsert_documents(chunks, embeddings)
-
+                    if settings.hybrid_search:
+                        bm25_index.upsert_chunks(chunks)
                 manifest.entries[posix] = h
                 stat_meta[posix] = st
+                return md_path, len(chunks)
+
+            if files_to_process:
+                if show_progress:
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        TaskProgressColumn(),
+                    ) as progress:
+                        task = progress.add_task("A indexar ficheiros…", total=len(files_to_process))
+                        for md_path in files_to_process:
+                            _, n_chunks = await process_file(md_path)
+                            indexed += 1
+                            chunks_total += n_chunks
+                            progress.advance(task)
+                else:
+                    results = await pipeline.map_parallel(files_to_process, process_file)
+                    for _, n_chunks in results:
+                        indexed += 1
+                        chunks_total += n_chunks
+
+            for md_path in files:
+                if md_path not in paths_to_index:
+                    skipped += 1
+                    posix = filepath_to_posix_source(md_path, vr)
+                    st = await asyncio.to_thread(file_stat_meta, md_path)
+                    stat_meta[posix] = st
 
             for orphan in [p for p in list(manifest.entries) if p not in current_paths]:
                 await store.delete_by_source_path(orphan)
                 manifest.entries.pop(orphan, None)
                 stat_meta.pop(orphan, None)
+                bm25_index.delete_by_source_path(orphan)
 
-            save_manifest(mf, manifest)
-            save_manifest_meta(meta_path, stat_meta)
+            persistence.save_manifest(manifest)
+            persistence.save_stat_meta(stat_meta)
+            if settings.hybrid_search:
+                persistence.save_bm25(bm25_index)
 
             _LOG.info(
                 "index.complete",
@@ -271,12 +217,17 @@ async def index_vault(
 
 
 async def auto_index_if_needed(settings: Settings) -> IndexSummary | None:
-    """Run incremental indexing only when vault content changed."""
-
     report = await scan_vault_changes(settings)
     if not report.has_changes:
         _LOG.info("index.auto.skipped", reason="vault_unchanged")
         return None
-
     _LOG.info("index.auto.triggered", reason="vault_changed")
-    return await index_vault(settings, change_report=report)
+    return await index_vault(settings, change_report=report, show_progress=False)
+
+
+def get_bm25_retriever(settings: Settings) -> BM25LexicalRetriever | None:
+    if not settings.hybrid_search:
+        return None
+    vs = pathlib.Path(settings.vectorstore_path).expanduser().resolve()
+    persistence = PersistenceService(vs)
+    return BM25LexicalRetriever(persistence.load_bm25())

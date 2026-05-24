@@ -19,7 +19,7 @@ class FakeEmbedder:
 def monkeypatch_fake_embedder(monkeypatch: pytest.MonkeyPatch) -> FakeEmbedder:
     fake = FakeEmbedder()
 
-    def _maker(_settings: object) -> FakeEmbedder:
+    def _maker(_settings: object, **kwargs: object) -> FakeEmbedder:
         return fake
 
     monkeypatch.setattr("secondbrain.embeddings.factory.make_embedder", _maker)

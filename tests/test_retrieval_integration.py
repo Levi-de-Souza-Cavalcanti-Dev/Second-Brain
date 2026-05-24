@@ -7,7 +7,6 @@ from secondbrain.ingestion.indexer import index_vault
 from secondbrain.models import SearchRequest
 from secondbrain.retrieval.lexical_base import NoopLexicalRetriever
 from secondbrain.retrieval.retriever import semantic_search_service
-
 from tests.helpers import configure_basic_env, write_sample_note
 
 

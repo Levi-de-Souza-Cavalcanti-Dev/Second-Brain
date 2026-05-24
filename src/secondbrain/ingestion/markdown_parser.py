@@ -77,7 +77,7 @@ def parse_markdown_file(path: Path, raw_text: str) -> ParsedMarkdown:
 
     wikilinks = _extract_wikilinks(body)
     if front:
-        for k, v in front.items():
+        for _k, v in front.items():
             if isinstance(v, str):
                 wikilinks = tuple(dict.fromkeys([*wikilinks, *_extract_wikilinks(v)]))
 
@@ -100,5 +100,5 @@ def parse_markdown_file(path: Path, raw_text: str) -> ParsedMarkdown:
 def stable_chunk_id(source_path: str, heading_path: str, ordinal: int) -> str:
     """Stable ids for chunk upserts (deterministic SHA-256 hex)."""
 
-    payload = f"{source_path}\0{heading_path}\0{ordinal}".encode("utf-8")
+    payload = f"{source_path}\0{heading_path}\0{ordinal}".encode()
     return hashlib.sha256(payload).hexdigest()

@@ -33,12 +33,16 @@ class AskRequest(BaseModel):
     query: str
     top_k: int = Field(default=8, ge=1, le=50)
     max_context_chars: int = Field(default=12_000, ge=500, le=100_000)
+    stream: bool = False
 
 
 class SourceCitation(BaseModel):
     path: str
     heading_path: str
     title: str = ""
+    line_start: int | None = None
+    line_end: int | None = None
+    obsidian_uri: str = ""
 
 
 class AskResponse(BaseModel):
@@ -70,4 +74,6 @@ class DocumentChunk:
     file_hash: str
     heading_level: int = 0
     chunk_index_in_section: int = 0
+    line_start: int = 0
+    line_end: int = 0
     extra_metadata: dict[str, Any] = field(default_factory=dict)

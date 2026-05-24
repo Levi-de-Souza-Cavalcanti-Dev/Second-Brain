@@ -4,7 +4,11 @@ import pytest
 
 from secondbrain.config import Settings
 from secondbrain.models import AskRequest, SearchHit
-from secondbrain.rag.pipeline import EMPTY_CONTEXT_ANSWER, answer_question, build_context_with_citations
+from secondbrain.rag.pipeline import (
+    EMPTY_CONTEXT_ANSWER,
+    answer_question,
+    build_context_with_citations,
+)
 
 
 def test_build_context_dedupes_identical_text() -> None:

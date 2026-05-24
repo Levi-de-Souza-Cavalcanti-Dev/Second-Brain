@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from secondbrain.ingestion.markdown_parser import parse_markdown_file, stable_chunk_id
-
 from tests.helpers import write_sample_note
 
 

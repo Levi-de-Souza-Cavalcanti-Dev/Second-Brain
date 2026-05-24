@@ -84,6 +84,8 @@ class ChromaVectorStore:
             "tags_pipe": self._tags_pipe(c.tags),
             "wikilinks_joined": ",".join(c.wikilinks),
             "title": title,
+            "line_start": int(c.line_start),
+            "line_end": int(c.line_end),
         }
         if c.tags:
             meta["tags"] = list(c.tags)

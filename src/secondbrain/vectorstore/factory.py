@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from secondbrain.constants import DEFAULT_COLLECTION_NAME
 from secondbrain.vectorstore.chroma_store import ChromaVectorStore
 from secondbrain.vectorstore.store import VectorStoreProtocol
 
@@ -9,7 +10,7 @@ from secondbrain.vectorstore.store import VectorStoreProtocol
 @dataclass(slots=True)
 class VectorStoreDeps:
     dimension: int
-    collection_name: str = "secondbrain_notes"
+    collection_name: str = DEFAULT_COLLECTION_NAME
 
 
 async def build_vector_store(persistence_path: str, deps: VectorStoreDeps) -> VectorStoreProtocol:

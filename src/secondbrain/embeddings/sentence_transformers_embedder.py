@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from secondbrain.embeddings.base import EmbeddingError, EmbedderProtocol
+from secondbrain.embeddings.base import EmbedderProtocol, EmbeddingError
 
 _MODEL_CACHE: dict[str, Any] = {}
 
